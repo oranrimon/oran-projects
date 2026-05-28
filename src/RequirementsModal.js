@@ -10,6 +10,32 @@ const SL = {
   committee:'ועדה', design:'בקרת תכן', permit:'היתר', start:'תחילת עבודות'
 };
 
+const LIBRARY = {
+  'פטור ממיגון פקע"ר': [
+    {t:'תכנית בקשה חתומה',own:'אני'},
+    {t:'טופס בקשה לפטור',own:'אני'},
+    {t:'צילומי מרחב מוגן + PDF',own:'יזם'},
+    {t:'קבלת אישור/פטור פקע"ר',own:'אני'},
+  ],
+  'נסח טאבו עדכני': [
+    {t:'בדיקת תוקף — 3 חודשים',own:'אני'},
+    {t:'העלאה למערכת',own:'יזם'},
+  ],
+  'הסכמת בעלי זכויות (75%)': [
+    {t:'הפצת טבלת הסכמות לדיירים',own:'יזם'},
+    {t:'איסוף חתימות מינ\' 75%',own:'יזם'},
+  ],
+  'חישובים סטטיים והצהרת מהנדס': [
+    {t:'העברת תכניות למהנדס שלד',own:'יזם'},
+    {t:'קבלת חישובים + הצהרת מהנדס',own:'יזם'},
+  ],
+  'אישור תחילת עבודות': [
+    {t:'הגשת בקשה ברישוי זמין',own:'אני'},
+    {t:'מינוי קבלן רשום + תשלום אגרה',own:'יזם'},
+    {t:'חתימת מהנדס ביקורת',own:'יזם'},
+  ],
+};
+
 const DEFAULT_REQS = {
   info: [
     {req:'הגשת בקשת מידע',code:'',simple:false,inv:false,irrel:false,completed:false,tasks:[
@@ -20,7 +46,10 @@ const DEFAULT_REQS = {
     {req:'צילומי חזיתות',code:'',simple:true,inv:true,s:'red',done:'',own:'יזם',irrel:false,completed:false},
   ],
   submit: [
-    {req:'נסח טאבו עדכני',code:'',simple:true,inv:true,s:'red',done:'',own:'יזם',irrel:false,completed:false,note:'תוקף 3 חודשים'},
+    {req:'נסח טאבו עדכני',code:'',simple:false,inv:true,irrel:false,completed:false,tasks:[
+      {t:'בדיקת תוקף — 3 חודשים',own:'אני',s:'red',due:'',done:''},
+      {t:'העלאה למערכת',own:'יזם',s:'red',due:'',done:''},
+    ]},
     {req:'הסכמת בעלי זכויות (75%)',code:'',simple:false,inv:true,irrel:false,completed:false,tasks:[
       {t:'הפצת טבלת הסכמות לדיירים',own:'יזם',s:'red',due:'',done:''},
       {t:'איסוף חתימות מינ\' 75%',own:'יזם',s:'red',due:'',done:''},
@@ -53,7 +82,9 @@ const DEFAULT_REQS = {
     ]},
   ],
   design: [
-    {req:'הצהרת עורך בקשה',code:'',simple:true,inv:false,s:'red',done:'',own:'אני',irrel:false,completed:false},
+    {req:'הצהרת עורך בקשה',code:'',simple:false,inv:false,irrel:false,completed:false,tasks:[
+      {t:'עריכת הצהרת עורך + חתימה',own:'אני',s:'red',due:'',done:''},
+    ]},
     {req:'חישובים סטטיים (בקרת תכן)',code:'',simple:false,inv:true,irrel:false,completed:false,tasks:[
       {t:'קבלת נספח יציבות',own:'יזם',s:'red',due:'',done:''},
     ]},
@@ -77,10 +108,27 @@ const DEFAULT_REQS = {
   ],
 };
 
-function dueStr(d) {
-  if (!d) return '—';
-  try { return new Date(d).toLocaleDateString('he-IL',{day:'numeric',month:'numeric',year:'2-digit'}); }
-  catch(e) { return d; }
+function formatDate(iso) {
+  if (!iso) return '';
+  try {
+    const d = new Date(iso);
+    return `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`;
+  } catch(e) { return iso; }
+}
+
+function isoFrom(d) {
+  if (!d) return '';
+  try {
+    const pts = d.split('/');
+    if (pts.length===3) return `${pts[2]}-${pts[1].padStart(2,'0')}-${pts[0].padStart(2,'0')}`;
+  } catch(e) {}
+  return '';
+}
+
+function dueCls(iso) {
+  if (!iso) return 'due-none';
+  const diff = (new Date(iso) - new Date()) / 86400000;
+  return diff < 0 ? 'due-late' : diff < 7 ? 'due-soon' : 'due-ok';
 }
 
 export default function RequirementsModal({ project, onClose }) {
@@ -96,69 +144,85 @@ export default function RequirementsModal({ project, onClose }) {
   const [reqs, setReqs] = useState(initReqs);
   const [openStages, setOpenStages] = useState(new Set([project.stage]));
   const [openReqs, setOpenReqs] = useState({});
+  const [stageDues, setStageDues] = useState({});
+  const [library, setLibrary] = useState(() => JSON.parse(JSON.stringify(LIBRARY)));
+  const today = new Date().toISOString().split('T')[0];
 
   const toggleStage = (s) => {
-    setOpenStages(prev => {
-      const n = new Set(prev);
-      n.has(s) ? n.delete(s) : n.add(s);
-      return n;
-    });
+    setOpenStages(prev => { const n=new Set(prev); n.has(s)?n.delete(s):n.add(s); return n; });
   };
-
   const toggleReq = (key) => {
     setOpenReqs(prev => ({ ...prev, [key]: !prev[key] }));
   };
 
-  const cycleTask = (stageId, ri, ti) => {
-    setReqs(prev => {
+  const upd = (fn) => setReqs(prev => { const n=JSON.parse(JSON.stringify(prev)); fn(n); return n; });
+
+  const cycleTask = (s,ri,ti) => upd(n => {
+    const t=n[s][ri].tasks[ti];
+    t.s=t.s==='red'?'yellow':t.s==='yellow'?'green':'red';
+    if(t.s==='green') t.done=formatDate(today);
+    if(t.s==='red') t.done='';
+  });
+
+  const toggleOwn = (s,ri,ti) => upd(n => {
+    n[s][ri].tasks[ti].own=n[s][ri].tasks[ti].own==='אני'?'יזם':'אני';
+  });
+
+  const setTaskDue = (s,ri,ti,val) => upd(n => { n[s][ri].tasks[ti].due=val; });
+  const setTaskDone = (s,ri,ti,val) => upd(n => {
+    const t=n[s][ri].tasks[ti];
+    t.done=val?formatDate(val):'';
+    if(val&&t.s!=='green') t.s='green';
+  });
+
+  const toggleIrrelTask = (s,ri,ti) => upd(n => {
+    const t=n[s][ri].tasks[ti];
+    t.irrel=!t.irrel;
+  });
+  const markDoneTask = (s,ri,ti) => upd(n => {
+    const t=n[s][ri].tasks[ti];
+    t.s='green';
+    if(!t.done) t.done=formatDate(today);
+  });
+
+  const toggleIrrel = (s,ri) => upd(n => { n[s][ri].irrel=!n[s][ri].irrel; });
+  const toggleCompleted = (s,ri) => upd(n => { n[s][ri].completed=!n[s][ri].completed; });
+
+  const saveToLibrary = (s,ri,ti) => {
+    const t = reqs[s][ri].tasks[ti];
+    setLibrary(prev => {
       const n = JSON.parse(JSON.stringify(prev));
-      const t = n[stageId][ri].tasks[ti];
-      t.s = t.s === 'red' ? 'yellow' : t.s === 'yellow' ? 'green' : 'red';
-      if (t.s === 'green') t.done = new Date().toLocaleDateString('he-IL');
-      else t.done = '';
+      const key = reqs[s][ri].req;
+      if (!n[key]) n[key] = [];
+      if (!n[key].find(x=>x.t===t.t)) n[key].push({t:t.t,own:t.own});
       return n;
     });
+    alert(`"${t.t}" נשמר לספרייה`);
   };
 
-  const cycleSimple = (stageId, ri) => {
-    setReqs(prev => {
-      const n = JSON.parse(JSON.stringify(prev));
-      const r = n[stageId][ri];
-      r.s = r.s === 'red' ? 'yellow' : r.s === 'yellow' ? 'green' : 'red';
-      if (r.s === 'green') r.done = new Date().toLocaleDateString('he-IL');
-      else r.done = '';
-      return n;
-    });
-  };
-
-  const toggleIrrel = (stageId, ri) => {
-    setReqs(prev => {
-      const n = JSON.parse(JSON.stringify(prev));
-      n[stageId][ri].irrel = !n[stageId][ri].irrel;
-      return n;
-    });
-  };
-
-  const toggleCompleted = (stageId, ri) => {
-    setReqs(prev => {
-      const n = JSON.parse(JSON.stringify(prev));
-      n[stageId][ri].completed = !n[stageId][ri].completed;
-      return n;
-    });
-  };
-
-  const addTask = (stageId, ri) => {
+  const addTask = (s,ri) => {
     const name = prompt('שם המשימה החדשה:');
     if (!name) return;
-    setReqs(prev => {
-      const n = JSON.parse(JSON.stringify(prev));
-      n[stageId][ri].tasks.push({t:name,own:'אני',s:'red',due:'',done:''});
-      return n;
+    upd(n => { n[s][ri].tasks.push({t:name,own:'אני',s:'red',due:'',done:'',irrel:false}); });
+  };
+
+  const addReq = (s) => {
+    const name = prompt('שם הדרישה החדשה:');
+    if (!name) return;
+    const libTasks = library[name] || [];
+    upd(n => {
+      n[s].push({
+        req:name,code:'',simple:false,inv:false,irrel:false,completed:false,
+        tasks: libTasks.length > 0
+          ? libTasks.map(lt=>({t:lt.t,own:lt.own,s:'red',due:'',done:'',irrel:false}))
+          : [{t:'משימה ראשונה',own:'אני',s:'red',due:'',done:'',irrel:false}]
+      });
     });
+    setOpenStages(prev => { const n=new Set(prev); n.add(s); return n; });
   };
 
   return (
-    <div className="modal-overlay" onClick={e => { if(e.target.classList.contains('modal-overlay')) onClose(); }}>
+    <div className="modal-overlay" onClick={e=>{if(e.target.classList.contains('modal-overlay'))onClose();}}>
       <div className="modal-box">
         <div className="modal-hdr">
           <span className="modal-close" onClick={onClose}>×</span>
@@ -168,92 +232,67 @@ export default function RequirementsModal({ project, onClose }) {
           </div>
         </div>
         <div className="modal-col-hdrs">
-          <div style={{width:40,flexShrink:0,textAlign:'center'}}>מספר</div>
           <div style={{width:20,flexShrink:0}}></div>
           <div style={{flex:1}}>דרישה / משימה</div>
           <div style={{width:48,textAlign:'center',flexShrink:0}}>אחראי</div>
-          <div style={{width:62,textAlign:'center',flexShrink:0}}>יעד</div>
-          <div style={{width:64,textAlign:'center',flexShrink:0}}>הושלם</div>
-          <div style={{width:52,flexShrink:0}}></div>
+          <div style={{width:100,textAlign:'center',flexShrink:0}}>יעד</div>
+          <div style={{width:90,textAlign:'center',flexShrink:0}}>הושלם</div>
+          <div style={{width:70,flexShrink:0}}></div>
         </div>
         <div className="modal-body">
-          {stages.map((s, si) => {
-            const isOpen = openStages.has(s);
-            const stageReqs = reqs[s] || [];
-            const total = stageReqs.filter(r=>!r.irrel).reduce((a,r)=>a+(r.simple?1:(r.tasks||[]).length),0);
-            const done = stageReqs.filter(r=>!r.irrel).reduce((a,r)=>{
-              if(r.simple) return a+(r.s==='green'?1:0);
-              return a+(r.tasks||[]).filter(t=>t.s==='green').length;
-            },0);
-            const isCur = s === project.stage;
-            const isPast = si < ci;
-            const stageCls = isPast ? 'stage-done' : isCur ? (project.atC?'stage-com':'stage-mine') : 'stage-future';
+          {stages.map((s,si)=>{
+            const isOpen=openStages.has(s);
+            const stageReqs=reqs[s]||[];
+            const total=stageReqs.filter(r=>!r.irrel).reduce((a,r)=>a+(r.tasks||[]).filter(t=>!t.irrel).length,0);
+            const done=stageReqs.filter(r=>!r.irrel).reduce((a,r)=>a+(r.tasks||[]).filter(t=>!t.irrel&&t.s==='green').length,0);
+            const isCur=s===project.stage;
+            const isPast=si<ci;
+            const stageCls=isPast?'stage-done':isCur?(project.atC?'stage-com':'stage-mine'):'stage-future';
+            const sd=stageDues[s];
 
             return (
               <div key={s} className="stage-block">
-                <div className={`stage-hdr ${stageCls}`} onClick={() => toggleStage(s)}>
-                  <span style={{fontSize:11,color:'#999',marginLeft:6}}>{isOpen?'▴':'▾'}</span>
-                  <span className={`stage-lbl-tag ${stageCls}`}>
-                    {isPast?'הושלם':isCur?(project.atC?'ועדה':'נוכחי'):'עתידי'}
-                  </span>
+                <div className={`stage-hdr ${stageCls}`} onClick={()=>toggleStage(s)}>
+                  <span style={{fontSize:11,color:'#999',marginLeft:4}}>{isOpen?'▴':'▾'}</span>
+                  <span className={`stage-lbl-tag ${stageCls}`}>{isPast?'הושלם':isCur?(project.atC?'ועדה':'נוכחי'):'עתידי'}</span>
                   <div className="stage-name">{SL[s]}</div>
+                  <input
+                    type="date"
+                    value={sd||''}
+                    onClick={e=>e.stopPropagation()}
+                    onChange={e=>{e.stopPropagation();setStageDues(prev=>({...prev,[s]:e.target.value}));}}
+                    style={{fontSize:10,border:'1px solid #ddd',borderRadius:4,padding:'1px 4px',marginLeft:6,color:sd?({due_late:'#A32D2D',due_soon:'#854F0B',due_ok:'#3B6D11'}[dueCls(sd)]||'#333'):'#ccc'}}
+                  />
+                  {sd&&<span className={`stage-due-badge ${dueCls(sd)}`}>{formatDate(sd)}</span>}
                   <span className="stage-prog">{done}/{total}</span>
                 </div>
-                {isOpen && (
+                {isOpen&&(
                   <div>
-                    {stageReqs.map((r, ri) => {
-                      const key = `${s}-${ri}`;
-                      const isReqOpen = openReqs[key] !== false && openReqs[key] !== undefined
-                        ? openReqs[key]
-                        : !(r.tasks||[]).every(t=>t.s==='green') && !r.irrel && !r.completed;
-
-                      if (r.simple) return (
-                        <div key={ri} className={`req-row-simple ${r.irrel?'irrel':''}`}>
-                          <div style={{width:40,flexShrink:0,fontSize:9,color:'#999',textAlign:'center'}}>{r.code}</div>
-                          <div style={{width:20,flexShrink:0,paddingTop:2}}>
-                            <div className={`chk3 ${r.s}`} onClick={()=>cycleSimple(s,ri)}>
-                              {r.s==='red'?'!':r.s==='yellow'?'✓':'✔'}
-                            </div>
-                          </div>
-                          <div style={{flex:1}}>
-                            <div className={`req-name ${r.irrel?'line-through':''}`}>{r.req}{r.inv&&<span className="izm-b"> יזם</span>}</div>
-                            {r.note&&<div className="task-note">{r.note}</div>}
-                          </div>
-                          <div style={{width:48,textAlign:'center',flexShrink:0}}>
-                            <span className={r.own==='אני'?'own-me':'own-inv'}>{r.own}</span>
-                          </div>
-                          <div style={{width:62,flexShrink:0}}></div>
-                          <div style={{width:64,textAlign:'center',flexShrink:0,fontSize:10,color:'#3B6D11'}}>{r.done||'—'}</div>
-                          <div style={{width:52,flexShrink:0,display:'flex',gap:3,justifyContent:'center'}}>
-                            <button className={`r-btn ${r.completed?'done-a':''}`} onClick={()=>toggleCompleted(s,ri)}>✓</button>
-                            <button className={`r-btn ${r.irrel?'irrel-a':''}`} onClick={()=>toggleIrrel(s,ri)}>ל.ר</button>
-                          </div>
-                        </div>
-                      );
-
+                    {stageReqs.map((r,ri)=>{
+                      const key=`${s}-${ri}`;
+                      const isReqOpen=openReqs[key]!==undefined?openReqs[key]:!(r.tasks||[]).every(t=>t.s==='green')&&!r.irrel&&!r.completed;
                       return (
                         <div key={ri}>
                           <div className={`req-row-complex ${r.irrel?'irrel':''}`} onClick={()=>toggleReq(key)}>
-                            <div style={{width:40,flexShrink:0,fontSize:9,color:'#999',textAlign:'center'}}>{r.code}</div>
                             <div style={{width:20,flexShrink:0,fontSize:11,color:'#999'}}>{isReqOpen?'▾':'▸'}</div>
                             <div style={{flex:1}}>
                               <div style={{display:'flex',alignItems:'baseline',gap:5}}>
                                 <span className={`req-name ${r.irrel?'line-through':''}`}>{r.req}{r.inv&&<span className="izm-b"> יזם</span>}</span>
-                                <span className="req-prog-badge">{(r.tasks||[]).filter(t=>t.s==='green').length}/{(r.tasks||[]).length}</span>
+                                <span className="req-prog-badge">{(r.tasks||[]).filter(t=>!t.irrel&&t.s==='green').length}/{(r.tasks||[]).filter(t=>!t.irrel).length}</span>
                               </div>
                             </div>
                             <div style={{width:48,flexShrink:0}}></div>
-                            <div style={{width:62,flexShrink:0}}></div>
-                            <div style={{width:64,flexShrink:0}}></div>
-                            <div style={{width:52,flexShrink:0,display:'flex',gap:3,justifyContent:'center'}} onClick={e=>e.stopPropagation()}>
+                            <div style={{width:100,flexShrink:0}}></div>
+                            <div style={{width:90,flexShrink:0}}></div>
+                            <div style={{width:70,flexShrink:0,display:'flex',gap:2,justifyContent:'center'}} onClick={e=>e.stopPropagation()}>
                               <button className={`r-btn ${r.completed?'done-a':''}`} onClick={()=>toggleCompleted(s,ri)}>✓</button>
                               <button className={`r-btn ${r.irrel?'irrel-a':''}`} onClick={()=>toggleIrrel(s,ri)}>ל.ר</button>
                             </div>
                           </div>
-                          {isReqOpen && !r.irrel && !r.completed && (
+                          {isReqOpen&&!r.irrel&&!r.completed&&(
                             <div className="req-tasks">
                               {(r.tasks||[]).map((t,ti)=>(
-                                <div key={ti} className="task-row-m">
+                                <div key={ti} className={`task-row-m ${t.irrel?'irrel':''}`}>
                                   <div className="task-indent"></div>
                                   <div style={{width:20,flexShrink:0,paddingTop:2}}>
                                     <div className={`chk3 ${t.s}`} onClick={()=>cycleTask(s,ri,ti)}>
@@ -261,25 +300,43 @@ export default function RequirementsModal({ project, onClose }) {
                                     </div>
                                   </div>
                                   <div style={{flex:1}}>
-                                    <div className={`task-txt ${t.s==='green'?'line-through':''}`}>{t.t}</div>
+                                    <div className={`task-txt ${t.s!=='red'||t.irrel?'line-through':''}`}
+                                      style={{color:t.s==='green'?'#aaa':t.s==='yellow'?'#854F0B':t.irrel?'#ccc':undefined}}>
+                                      {t.t}
+                                    </div>
                                     {t.note&&<div className="task-note">{t.note}</div>}
                                   </div>
                                   <div style={{width:48,textAlign:'center',flexShrink:0}}>
-                                    <span className={t.own==='אני'?'own-me':'own-inv'}>{t.own}</span>
+                                    <span className={t.own==='אני'?'own-me':'own-inv'} style={{cursor:'pointer'}} onClick={()=>toggleOwn(s,ri,ti)}>{t.own}</span>
                                   </div>
-                                  <div style={{width:62,textAlign:'center',flexShrink:0,fontSize:10,color:'#999'}}>{dueStr(t.due)}</div>
-                                  <div style={{width:64,textAlign:'center',flexShrink:0,fontSize:10,color:'#3B6D11'}}>{t.done||'—'}</div>
-                                  <div style={{width:52,flexShrink:0}}></div>
+                                  <div style={{width:100,textAlign:'center',flexShrink:0}}>
+                                    <input type="date" value={t.due||''} onClick={e=>e.stopPropagation()}
+                                      onChange={e=>setTaskDue(s,ri,ti,e.target.value)}
+                                      style={{fontSize:9,border:'1px solid #eee',borderRadius:3,padding:'1px 2px',width:95,color:t.due?({due_late:'#A32D2D',due_soon:'#854F0B',due_ok:'#3B6D11'}[dueCls(t.due)]||'#333'):'#ccc'}}/>
+                                  </div>
+                                  <div style={{width:90,textAlign:'center',flexShrink:0}}>
+                                    <input type="date" value={t.done?isoFrom(t.done):''} onClick={e=>e.stopPropagation()}
+                                      onChange={e=>setTaskDone(s,ri,ti,e.target.value)}
+                                      style={{fontSize:9,border:'1px solid #eee',borderRadius:3,padding:'1px 2px',width:85,color:t.done?'#3B6D11':'#ccc'}}/>
+                                  </div>
+                                  <div style={{width:70,flexShrink:0,display:'flex',gap:2,justifyContent:'center'}} onClick={e=>e.stopPropagation()}>
+                                    <button className={`r-btn ${t.s==='green'?'done-a':''}`} onClick={()=>markDoneTask(s,ri,ti)} title="סמן הושלם">✓</button>
+                                    <button className={`r-btn ${t.irrel?'irrel-a':''}`} onClick={()=>toggleIrrelTask(s,ri,ti)} title="לא רלוונטי">ל.ר</button>
+                                    <button className="r-btn" onClick={()=>saveToLibrary(s,ri,ti)} title="שמור לספרייה">📚</button>
+                                  </div>
                                 </div>
                               ))}
-                              <div style={{padding:'5px 0 3px 10px'}}>
-                                <button className="btn" style={{fontSize:9}} onClick={()=>addTask(s,ri)}>+ משימה חדשה</button>
+                              <div style={{padding:'5px 0 3px 10px',display:'flex',gap:5}}>
+                                <button className="btn" style={{fontSize:9}} onClick={()=>addTask(s,ri)}>+ משימה</button>
                               </div>
                             </div>
                           )}
                         </div>
                       );
                     })}
+                    <div style={{padding:'6px 13px'}}>
+                      <button className="btn" style={{fontSize:9}} onClick={()=>addReq(s)}>+ דרישה חדשה</button>
+                    </div>
                   </div>
                 )}
               </div>
