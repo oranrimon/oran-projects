@@ -39,7 +39,7 @@ function ProjectCard({ p }) {
   const [open, setOpen] = useState(false);
   const stages = TRK[p.track] || TRK['מלא'];
   const ci = stages.indexOf(p.stage);
-  const dc = dueCls(p.due);
+ 
 
   return (
     <div className={`pcard ${p.atC ? 'committee' : 'mine'}`}>
