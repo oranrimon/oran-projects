@@ -30,11 +30,6 @@ function dueStr(d) {
   return new Date(d).toLocaleDateString('he-IL', {day:'numeric',month:'numeric',year:'2-digit'});
 }
 
-function dueCls(d) {
-  const diff = (new Date(d) - new Date()) / 86400000;
-  return diff < 0 ? 'late' : diff < 7 ? 'soon' : 'ok';
-}
-
 function ProjectCard({ p }) {
   const [open, setOpen] = useState(false);
   const stages = TRK[p.track] || TRK['מלא'];
