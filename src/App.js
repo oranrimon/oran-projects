@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import './App.css';
+import RequirementsModal from './RequirementsModal';
 
 const SL = {
   info: 'מידע', submit: 'הגשה', spatial: 'בקרה מרחבית',
@@ -74,7 +75,7 @@ function IDCard({ ic }) {
   );
 }
 
-function ProjectCard({ p }) {
+function ProjectCard({ p, onOpenReqs }) {
   const [open, setOpen] = useState(false);
   const stages = TRK[p.track] || TRK['מלא'];
   const ci = stages.indexOf(p.stage);
@@ -110,8 +111,7 @@ function ProjectCard({ p }) {
           })}
         </div>
         <div className="card-btns" onClick={e => e.stopPropagation()}>
-          <button className="btn btn-p">דרישות ומשימות</button>
-          <button className="btn">קבצים</button>
+<button className="btn btn-p" onClick={() => onOpenReqs(p)}>דרישות ומשימות</button>          <button className="btn">קבצים</button>
           <button className="btn">תשלומים</button>
           <button className="btn">Dropbox</button>
         </div>
@@ -120,8 +120,7 @@ function ProjectCard({ p }) {
         <div className="card-l2">
           <IDCard ic={ic} />
           <div className="card-btns" style={{marginTop:'10px',paddingTop:'10px',borderTop:'1px solid #eee'}}>
-            <button className="btn btn-p">דרישות ומשימות</button>
-            <button className="btn">קבצים</button>
+<button className="btn btn-p" onClick={() => onOpenReqs(p)}>דרישות ומשימות</button>            <button className="btn">קבצים</button>
             <button className="btn">תשלומים</button>
             <button className="btn">Dropbox</button>
           </div>
@@ -133,6 +132,7 @@ function ProjectCard({ p }) {
 
 function App() {
   const [filter, setFilter] = useState('all');
+  const [reqsProject, setReqsProject] = useState(null);
   const today = new Date().toLocaleDateString('he-IL', {weekday:'long',day:'numeric',month:'long'});
 
   const filtered = PROJECTS.filter(p => {
@@ -171,13 +171,14 @@ function App() {
 
         {urgent.length > 0 && (
           <>
-            {urgent.map(p => <ProjectCard key={p.id} p={p} />)}
+            {urgent.map(p => <ProjectCard key={p.id} p={p} onOpenReqs={setReqsProject} />)}
           </>
         )}
 
         <div className="sec-title">בתהליך</div>
-        {ok.map(p => <ProjectCard key={p.id} p={p} />)}
+        {ok.map(p => <ProjectCard key={p.id} p={p} onOpenReqs={setReqsProject} />)}
       </div>
+      {reqsProject && <RequirementsModal project={reqsProject} onClose={() => setReqsProject(null)} />}
     </div>
   );
 }
