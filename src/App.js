@@ -171,7 +171,6 @@ function App() {
 
         {urgent.length > 0 && (
           <>
-            <div className="sec-title">דורש טיפול</div>
             {urgent.map(p => <ProjectCard key={p.id} p={p} />)}
           </>
         )}
